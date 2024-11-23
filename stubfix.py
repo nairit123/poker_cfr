@@ -557,15 +557,10 @@ def solve_problem_3_2(game):
                 cum_strat_2[(node["id"], action)] = 0
 
     saddle_pts = []
+    # x[0] and y[0] initialized
+    p1_strat, localmap_1 = Cfr_p1.next_strategy()
+    p2_strat, localmap_2 = Cfr_p2.next_strategy()
     for i in range(1, 1001):
-        p1_strat, localmap_1 = Cfr_p1.next_strategy()
-        p2_strat, localmap_2 = Cfr_p2.next_strategy()
-        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, p1_strat)
-        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, p2_strat)
-        avg_strat_1 = div_strat(tfs_p1, cum_strat_1, i)
-        avg_strat_2 = div_strat(tfs_p2, cum_strat_2, i)
-
-        saddle_pts.append(gap(game, avg_strat_1, avg_strat_2))
 
         # observe utilities simultaneously
         observed_util_1 = dict() # for each terminal node, we go up the game tree
@@ -616,6 +611,15 @@ def solve_problem_3_2(game):
 
         Cfr_p1.observe_utility(observed_util_1)
         Cfr_p2.observe_utility(observed_util_2)
+
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, p1_strat)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, p2_strat)
+        avg_strat_1 = div_strat(tfs_p1, cum_strat_1, i)
+        avg_strat_2 = div_strat(tfs_p2, cum_strat_2, i)
+
+        saddle_pts.append(gap(game, avg_strat_1, avg_strat_2))
 
 
     # sanity check
@@ -668,14 +672,7 @@ def solve_problem_3_3(game):
 
     p1_strat, localmap_1 = Cfr_p1.next_strategy()
     p2_strat, localmap_2 = Cfr_p2.next_strategy()
-    cum_strat_1 = add_strat(tfs_p1, cum_strat_1, p1_strat)
-    cum_strat_2 = add_strat(tfs_p2, cum_strat_2, p2_strat)
-    avg_strat_1 = div_strat(tfs_p1, cum_strat_1, 1)
-    avg_strat_2 = div_strat(tfs_p2, cum_strat_2, 1)
-
-    util_pl1_cfr.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
-    saddle_pts_cfr.append(gap(game, avg_strat_1, avg_strat_2))
-    for i in range(2, 1001):
+    for i in range(1, 1001):
 
         # observe utilities simultaneously
         observed_util_1 = dict() # for each terminal node, we go up the game tree
@@ -738,8 +735,11 @@ def solve_problem_3_3(game):
         saddle_pts_cfr.append(gap(game, avg_strat_1, avg_strat_2))
 
     print(f"saddle point of CFR simultaneous: {saddle_pts_cfr[-1]}")
+
     Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingPlus)
     Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingPlus)
+
+
 
     cum_strat_1 = dict()
     for node in tfs_p1:
@@ -767,9 +767,6 @@ def solve_problem_3_3(game):
         # player 2 asks CFR for a new strat
         # player 2 observes utilities computed from player 1's last strat
 
-        p1_strat, localmap_1 = Cfr_p1.next_strategy()
-        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** gamma)
-        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
 
         observed_util_1 = dict()
         for node in tfs_p1:
@@ -795,10 +792,11 @@ def solve_problem_3_3(game):
 
         Cfr_p1.observe_utility(observed_util_1)
 
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** gamma)
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
 
-        p2_strat, localmap_2 = Cfr_p2.next_strategy()
-        multiplied_2 = mul_strat(tfs_p2, p2_strat, i**gamma)
-        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
 
         observed_util_2 = dict()
         for node in tfs_p2:
@@ -824,14 +822,18 @@ def solve_problem_3_3(game):
 
         Cfr_p2.observe_utility(observed_util_2)
 
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        multiplied_2 = mul_strat(tfs_p2, p2_strat, i**gamma)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
         avg_strat_1 = div_strat(tfs_p1, cum_strat_1, normalizer)
         avg_strat_2 = div_strat(tfs_p2, cum_strat_2, normalizer)
 
         saddle_pts_cfrplus.append(gap(game, avg_strat_1, avg_strat_2))
         util_pl1_cfrplus.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
 
-    print(f"saddle point of CFR+: {saddle_pts_cfrplus[-1]}")
 
+    print(f"saddle point of CFR+: {saddle_pts_cfrplus[-1]}")
     Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingDiscount)
     Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingDiscount)
 
@@ -861,9 +863,6 @@ def solve_problem_3_3(game):
         # player 2 asks CFR for a new strat
         # player 2 observes utilities computed from player 1's last strat
 
-        p1_strat, localmap_1 = Cfr_p1.next_strategy()
-        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** 2)
-        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
 
         observed_util_1 = dict()
         for node in tfs_p1:
@@ -889,10 +888,11 @@ def solve_problem_3_3(game):
 
         Cfr_p1.observe_utility(observed_util_1)
 
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** 2)
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
 
-        p2_strat, localmap_2 = Cfr_p2.next_strategy()
-        multiplied_2 = mul_strat(tfs_p2, p2_strat, i ** 2)
-        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
 
         observed_util_2 = dict()
         for node in tfs_p2:
@@ -918,11 +918,16 @@ def solve_problem_3_3(game):
 
         Cfr_p2.observe_utility(observed_util_2)
 
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        multiplied_2 = mul_strat(tfs_p2, p2_strat, i ** 2)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
         avg_strat_1 = div_strat(tfs_p1, cum_strat_1, normalizer)
         avg_strat_2 = div_strat(tfs_p2, cum_strat_2, normalizer)
 
         saddle_pts_dcfr.append(gap(game, avg_strat_1, avg_strat_2))
         util_pl1_dcfr.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
+
 
     print(f"saddle point of DCFR: {saddle_pts_dcfr[-1]}")
 
@@ -955,9 +960,6 @@ def solve_problem_3_3(game):
         # player 2 asks CFR for a new strat
         # player 2 observes utilities computed from player 1's last strat
 
-        p1_strat, localmap_1 = Cfr_p1.next_strategy()
-        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** 2)
-        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
 
         observed_util_1 = dict()
         for node in tfs_p1:
@@ -983,10 +985,10 @@ def solve_problem_3_3(game):
 
         Cfr_p1.observe_utility(observed_util_1)
 
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** 2)
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
 
-        p2_strat, localmap_2 = Cfr_p2.next_strategy()
-        multiplied_2 = mul_strat(tfs_p2, p2_strat, i ** 2)
-        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
 
         observed_util_2 = dict()
         for node in tfs_p2:
@@ -1012,6 +1014,10 @@ def solve_problem_3_3(game):
 
         Cfr_p2.observe_utility(observed_util_2)
 
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        multiplied_2 = mul_strat(tfs_p2, p2_strat, i ** 2)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
         avg_strat_1 = div_strat(tfs_p1, cum_strat_1, normalizer)
         avg_strat_2 = div_strat(tfs_p2, cum_strat_2, normalizer)
 
@@ -1019,6 +1025,7 @@ def solve_problem_3_3(game):
         util_pl1_pcfr1.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
 
     print(f"saddle point of PCFR1: {saddle_pts_pcfr1[-1]}")
+
     Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingOptimisticPlus)
     Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingOptimisticPlus)
 
@@ -1048,7 +1055,6 @@ def solve_problem_3_3(game):
         # player 2 asks CFR for a new strat
         # player 2 observes utilities computed from player 1's last strat
 
-        p1_strat, localmap_1 = Cfr_p1.next_strategy()
 
         observed_util_1 = dict()
         for node in tfs_p1:
@@ -1073,9 +1079,8 @@ def solve_problem_3_3(game):
 
 
         Cfr_p1.observe_utility(observed_util_1)
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
 
-
-        p2_strat, localmap_2 = Cfr_p2.next_strategy()
 
         observed_util_2 = dict()
         for node in tfs_p2:
@@ -1100,6 +1105,7 @@ def solve_problem_3_3(game):
 
 
         Cfr_p2.observe_utility(observed_util_2)
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
 
         avg_strat_1 = p1_strat
         avg_strat_2 = p2_strat
@@ -1108,6 +1114,7 @@ def solve_problem_3_3(game):
         util_pl1_pcfr2.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
 
     print(f"saddle point of PCFR2: {saddle_pts_pcfr2[-1]}")
+
     import matplotlib.pyplot as plt
     plt.plot(range(1, 1001), saddle_pts_cfr, label="CFR")
     plt.plot(range(1, 1001), saddle_pts_cfrplus, label="CFR+")
