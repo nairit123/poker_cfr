@@ -228,6 +228,113 @@ class RegretMatching(object):
         for action in self.action_set:
             self.cum_regret[action] += (utility[action] - strat_util)
 
+# strong - not proven
+class RegretMatchingDom(object):
+    def __init__(self, action_set):
+        self.action_set = set(action_set)
+        self.cum_regret  = dict()
+        for action in action_set:
+            self.cum_regret[action] = 0
+        self.last_strat = dict()
+
+        self.graph = dict() # graph of dominating edges
+        for action in action_set:
+            self.graph[action] = [] # linked list
+        self.graph_empty = True # have not initialized graph yet
+        self.f = dict()
+        for action in action_set:
+            self.f[action] = action
+
+        self.iter = 0
+        self.c = 500
+        self.C = 15
+
+    def rec_help(self, action):
+        if len(self.graph[action]) == 0:
+            return action
+        return self.rec_help(self.graph[action][0])
+
+    def update_f(self):
+        """
+        print("Graph Representation (Adjacency List):")
+        for vertex in self.action_set:
+            neighbors = self.graph.get(vertex, [])
+            print(f"{vertex} -> {', '.join(map(str, neighbors)) if neighbors else 'No edges'}")
+        """
+        for action in self.action_set:
+            # go as far as we can recursively
+            self.f[action] = self.rec_help(action)
+
+
+    def next_strategy(self):
+        # FINISH
+        # You might want to return a dictionary mapping each action in
+        # `self.action_set` to the probability of picking that action
+
+        self.iter += 1
+        ret = dict()
+
+        normalizer = 0
+        for action in self.action_set:
+            normalizer += max(0, self.cum_regret[action])
+
+        if normalizer == 0:
+            for action in self.action_set:
+                ret[action] = 1.0/len(self.action_set)
+        else:
+            for action in self.action_set:
+                ret[action] = max(0, self.cum_regret[action])/normalizer
+
+        self.last_strat = ret
+
+        if self.iter >= self.c + self.C:
+            dom_ret = dict()
+            for action in self.action_set:
+                dom_ret[action] = 0
+
+            for action in self.action_set:
+                dom_ret[self.f[action]] += ret[action]
+                if self.f[action] != action and ret[action] > 0:
+                    print("moved mass")
+
+            return dom_ret
+        else:
+            return ret
+
+    def observe_utility(self, utility):
+        assert isinstance(utility, dict) and utility.keys() == self.action_set
+
+
+        strat_util = 0 # <u, x> where x is last strategy
+        for action in self.action_set:
+            strat_util += (self.last_strat[action] * utility[action])
+
+        for action in self.action_set:
+            self.cum_regret[action] += (utility[action] - strat_util)
+
+        # if graph is empty, build it and modify f
+        # later, when we wait before building, modify condition to if graph empty and iter big enough
+
+        if self.iter >= self.c:
+            if self.graph_empty:
+                for action in self.action_set:
+                    for action2 in self.action_set:
+                        if action != action2:
+                            if utility[action] < utility[action2]:
+                                self.graph[action].append(action2)
+                self.update_f()
+                self.graph_empty = False
+            else:
+                for action in self.action_set:
+                    # delete edges (action, to) if u[a] > u[t]
+                    for i in range(len(self.graph[action]) - 1, -1, -1):
+                        to = self.graph[action][i]
+                        if utility[action] > utility[to]:
+                            del self.graph[action][i]
+                self.update_f()
+
+        # if graph nonempty, remove edges as needed and modify f
+
 class RegretMatchingPlus(object):
     def __init__(self, action_set):
         self.action_set = set(action_set)
@@ -1140,10 +1247,517 @@ def solve_problem_3_3(game):
     plt.show()
 
 
+# problem 3.4
+# This is an extension of the hw
+# This does the same thing as problem 3.3, but every regret minimizer becomes "dominated"
+# Specifically, we use our theorem to replace each regret minimizer R with regret minimizer R'
+def solve_problem_3_4(game):
+    gamma = 1
+    tfs_p1 = game["decision_problem_pl1"]
+    tfs_p2 = game["decision_problem_pl2"]
+
+    # map decision point ids to the full decision point nodes for each player
+    mp1 = dict()
+    for node in tfs_p1:
+        if node["type"] == "decision":
+            mp1[node["id"]] = node
+    mp2 = dict()
+    for node in tfs_p2:
+        if node["type"] == "decision":
+            mp2[node["id"]] = node
+
+    Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingDom)
+    Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingDom)
+
+    cum_strat_1 = dict()
+    for node in tfs_p1:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_1[(node["id"], action)] = 0
+
+    cum_strat_2 = dict()
+    for node in tfs_p2:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_2[(node["id"], action)] = 0
+
+    saddle_pts_cfr = []
+    util_pl1_cfr = []
+
+    p1_strat, localmap_1 = Cfr_p1.next_strategy()
+    p2_strat, localmap_2 = Cfr_p2.next_strategy()
+    for i in range(1, 1001):
+
+        # observe utilities simultaneously
+        observed_util_1 = dict() # for each terminal node, we go up the game tree
+        for node in tfs_p1:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_1[(node["id"], action)] = 0
+
+        observed_util_2 = dict() # for each terminal node, we go up the game tree
+        for node in tfs_p2:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_2[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            # cfr contributions for terminal node `term`
+            wz = p2_strat[term["sequence_pl2"]] * term["value"]
+            cur_node = mp1[term["sequence_pl1"][0]] # mp maps node id to node
+            cur_action = term["sequence_pl1"][1]
+            p1hza = 1 # pi_1(z|ha)
+            observed_util_1[(cur_node["id"], cur_action)] += wz
+            while True:
+                # utility contribution to all ancestors
+                p1hza *=  localmap_1[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp1[p_seq[0]]
+                cur_action = p_seq[1]
+
+                observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+
+        for term in game["utility_pl1"]:
+            wz = p1_strat[term["sequence_pl1"]] * term["value"]
+            cur_node = mp2[term["sequence_pl2"][0]] # decision point node
+            cur_action = term["sequence_pl2"][1]
+            p2hza = 1
+            observed_util_2[(cur_node["id"], cur_action)] -= wz
+            while True:
+                p2hza *= localmap_2[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp2[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+
+
+        Cfr_p1.observe_utility(observed_util_1)
+        Cfr_p2.observe_utility(observed_util_2)
+
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, p1_strat)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, p2_strat)
+        avg_strat_1 = div_strat(tfs_p1, cum_strat_1, i)
+        avg_strat_2 = div_strat(tfs_p2, cum_strat_2, i)
+
+        util_pl1_cfr.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
+        saddle_pts_cfr.append(gap(game, avg_strat_1, avg_strat_2))
+
+    print(f"saddle point of CFR simultaneous: {saddle_pts_cfr[-1]}")
+
+    Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingPlus)
+    Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingPlus)
+
+
+
+    cum_strat_1 = dict()
+    for node in tfs_p1:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_1[(node["id"], action)] = 0
+
+    cum_strat_2 = dict()
+    for node in tfs_p2:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_2[(node["id"], action)] = 0
+
+    saddle_pts_cfrplus = []
+    util_pl1_cfrplus = []
+
+    # initial (uniform) strategies
+    p1_strat, localmap_1 = Cfr_p1.next_strategy()
+    p2_strat, localmap_2 = Cfr_p2.next_strategy()
+    normalizer = 0
+    for i in range(1, 1001):
+        normalizer += i ** gamma
+        # player 1 asks CFR for a new strat
+        # player 1 observes utilities computed from player 2's last strat
+        # player 2 asks CFR for a new strat
+        # player 2 observes utilities computed from player 1's last strat
+
+
+        observed_util_1 = dict()
+        for node in tfs_p1:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_1[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p2_strat[term["sequence_pl2"]] * term["value"]
+            cur_node = mp1[term["sequence_pl1"][0]] # decision point node
+            cur_action = term["sequence_pl1"][1]
+            p1hza = 1
+            observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+            while True:
+                p1hza *= localmap_1[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp1[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+
+
+        Cfr_p1.observe_utility(observed_util_1)
+
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** gamma)
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
+
+
+
+        observed_util_2 = dict()
+        for node in tfs_p2:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_2[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p1_strat[term["sequence_pl1"]] * term["value"]
+            cur_node = mp2[term["sequence_pl2"][0]] # decision point node
+            cur_action = term["sequence_pl2"][1]
+            p2hza = 1
+            observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+            while True:
+                p2hza *= localmap_2[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp2[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+
+
+        Cfr_p2.observe_utility(observed_util_2)
+
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        multiplied_2 = mul_strat(tfs_p2, p2_strat, i**gamma)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
+        avg_strat_1 = div_strat(tfs_p1, cum_strat_1, normalizer)
+        avg_strat_2 = div_strat(tfs_p2, cum_strat_2, normalizer)
+
+        saddle_pts_cfrplus.append(gap(game, avg_strat_1, avg_strat_2))
+        util_pl1_cfrplus.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
+
+
+    print(f"saddle point of CFR+: {saddle_pts_cfrplus[-1]}")
+    Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingDiscount)
+    Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingDiscount)
+
+    cum_strat_1 = dict()
+    for node in tfs_p1:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_1[(node["id"], action)] = 0
+
+    cum_strat_2 = dict()
+    for node in tfs_p2:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_2[(node["id"], action)] = 0
+
+    saddle_pts_dcfr = []
+    util_pl1_dcfr = []
+
+    # initial (uniform) strategies
+    p1_strat, localmap_1 = Cfr_p1.next_strategy()
+    p2_strat, localmap_2 = Cfr_p2.next_strategy()
+    normalizer = 0
+    for i in range(1, 1001):
+        normalizer += i ** 2
+        # player 1 asks CFR for a new strat
+        # player 1 observes utilities computed from player 2's last strat
+        # player 2 asks CFR for a new strat
+        # player 2 observes utilities computed from player 1's last strat
+
+
+        observed_util_1 = dict()
+        for node in tfs_p1:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_1[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p2_strat[term["sequence_pl2"]] * term["value"]
+            cur_node = mp1[term["sequence_pl1"][0]] # decision point node
+            cur_action = term["sequence_pl1"][1]
+            p1hza = 1
+            observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+            while True:
+                p1hza *= localmap_1[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp1[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+
+
+        Cfr_p1.observe_utility(observed_util_1)
+
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** 2)
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
+
+
+
+        observed_util_2 = dict()
+        for node in tfs_p2:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_2[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p1_strat[term["sequence_pl1"]] * term["value"]
+            cur_node = mp2[term["sequence_pl2"][0]] # decision point node
+            cur_action = term["sequence_pl2"][1]
+            p2hza = 1
+            observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+            while True:
+                p2hza *= localmap_2[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp2[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+
+
+        Cfr_p2.observe_utility(observed_util_2)
+
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        multiplied_2 = mul_strat(tfs_p2, p2_strat, i ** 2)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
+        avg_strat_1 = div_strat(tfs_p1, cum_strat_1, normalizer)
+        avg_strat_2 = div_strat(tfs_p2, cum_strat_2, normalizer)
+
+        saddle_pts_dcfr.append(gap(game, avg_strat_1, avg_strat_2))
+        util_pl1_dcfr.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
+
+
+    print(f"saddle point of DCFR: {saddle_pts_dcfr[-1]}")
+
+    Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingOptimisticPlus)
+    Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingOptimisticPlus)
+
+    cum_strat_1 = dict()
+    for node in tfs_p1:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_1[(node["id"], action)] = 0
+
+    cum_strat_2 = dict()
+    for node in tfs_p2:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_2[(node["id"], action)] = 0
+
+    saddle_pts_pcfr1 = []
+    util_pl1_pcfr1 = []
+
+    # initial (uniform) strategies
+    p1_strat, localmap_1 = Cfr_p1.next_strategy()
+    p2_strat, localmap_2 = Cfr_p2.next_strategy()
+    normalizer = 0
+    for i in range(1, 1001):
+        normalizer += i ** 2
+        # player 1 asks CFR for a new strat
+        # player 1 observes utilities computed from player 2's last strat
+        # player 2 asks CFR for a new strat
+        # player 2 observes utilities computed from player 1's last strat
+
+
+        observed_util_1 = dict()
+        for node in tfs_p1:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_1[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p2_strat[term["sequence_pl2"]] * term["value"]
+            cur_node = mp1[term["sequence_pl1"][0]] # decision point node
+            cur_action = term["sequence_pl1"][1]
+            p1hza = 1
+            observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+            while True:
+                p1hza *= localmap_1[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp1[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+
+
+        Cfr_p1.observe_utility(observed_util_1)
+
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+        multiplied_1 = mul_strat(tfs_p1, p1_strat, i ** 2)
+        cum_strat_1 = add_strat(tfs_p1, cum_strat_1, multiplied_1)
+
+
+        observed_util_2 = dict()
+        for node in tfs_p2:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_2[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p1_strat[term["sequence_pl1"]] * term["value"]
+            cur_node = mp2[term["sequence_pl2"][0]] # decision point node
+            cur_action = term["sequence_pl2"][1]
+            p2hza = 1
+            observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+            while True:
+                p2hza *= localmap_2[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp2[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+
+
+        Cfr_p2.observe_utility(observed_util_2)
+
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+        multiplied_2 = mul_strat(tfs_p2, p2_strat, i ** 2)
+        cum_strat_2 = add_strat(tfs_p2, cum_strat_2, multiplied_2)
+
+        avg_strat_1 = div_strat(tfs_p1, cum_strat_1, normalizer)
+        avg_strat_2 = div_strat(tfs_p2, cum_strat_2, normalizer)
+
+        saddle_pts_pcfr1.append(gap(game, avg_strat_1, avg_strat_2))
+        util_pl1_pcfr1.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
+
+    print(f"saddle point of PCFR1: {saddle_pts_pcfr1[-1]}")
+
+    Cfr_p1 = Cfr(tfs_p1, rm_class=RegretMatchingOptimisticPlus)
+    Cfr_p2 = Cfr(tfs_p2, rm_class=RegretMatchingOptimisticPlus)
+
+    cum_strat_1 = dict()
+    for node in tfs_p1:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_1[(node["id"], action)] = 0
+
+    cum_strat_2 = dict()
+    for node in tfs_p2:
+        if node["type"] == "decision":
+            for action in node["actions"]:
+                cum_strat_2[(node["id"], action)] = 0
+
+    saddle_pts_pcfr2 = []
+    util_pl1_pcfr2 = []
+
+    # initial (uniform) strategies
+    p1_strat, localmap_1 = Cfr_p1.next_strategy()
+    p2_strat, localmap_2 = Cfr_p2.next_strategy()
+    normalizer = 0
+    for i in range(1, 1001):
+        normalizer += i ** 2
+        # player 1 asks CFR for a new strat
+        # player 1 observes utilities computed from player 2's last strat
+        # player 2 asks CFR for a new strat
+        # player 2 observes utilities computed from player 1's last strat
+
+
+        observed_util_1 = dict()
+        for node in tfs_p1:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_1[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p2_strat[term["sequence_pl2"]] * term["value"]
+            cur_node = mp1[term["sequence_pl1"][0]] # decision point node
+            cur_action = term["sequence_pl1"][1]
+            p1hza = 1
+            observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+            while True:
+                p1hza *= localmap_1[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp1[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_1[(cur_node["id"], cur_action)] += wz * p1hza
+
+
+        Cfr_p1.observe_utility(observed_util_1)
+        p1_strat, localmap_1 = Cfr_p1.next_strategy()
+
+
+        observed_util_2 = dict()
+        for node in tfs_p2:
+            if node["type"] == "decision":
+                for action in node["actions"]:
+                    observed_util_2[(node["id"], action)] = 0
+
+        for term in game["utility_pl1"]:
+            wz = p1_strat[term["sequence_pl1"]] * term["value"]
+            cur_node = mp2[term["sequence_pl2"][0]] # decision point node
+            cur_action = term["sequence_pl2"][1]
+            p2hza = 1
+            observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+            while True:
+                p2hza *= localmap_2[cur_node["id"]][cur_action]
+                p_seq = cur_node["parent_sequence"]
+                if p_seq is None:
+                    break
+                cur_node = mp2[p_seq[0]]
+                cur_action = p_seq[1]
+                observed_util_2[(cur_node["id"], cur_action)] -= wz * p2hza
+
+
+        Cfr_p2.observe_utility(observed_util_2)
+        p2_strat, localmap_2 = Cfr_p2.next_strategy()
+
+        avg_strat_1 = p1_strat
+        avg_strat_2 = p2_strat
+
+        saddle_pts_pcfr2.append(gap(game, avg_strat_1, avg_strat_2))
+        util_pl1_pcfr2.append(expected_utility_pl1(game, avg_strat_1, avg_strat_2))
+
+    print(f"saddle point of PCFR2: {saddle_pts_pcfr2[-1]}")
+
+    import matplotlib.pyplot as plt
+    plt.plot(range(1, 1001), saddle_pts_cfr, label="CFR")
+    plt.plot(range(1, 1001), saddle_pts_cfrplus, label="CFR+")
+    plt.plot(range(1, 1001), saddle_pts_dcfr, label="DCFR")
+    plt.plot(range(1, 1001), saddle_pts_pcfr1, label="PCFR 1")
+    plt.plot(range(1, 1001), saddle_pts_pcfr2, label="PCFR 2")
+    plt.xlabel('T')
+    plt.ylabel('saddle')
+    plt.title(f'Plot of saddle as a function of T')
+    plt.legend(loc="best")
+    plt.show()
+
+
+    plt.plot(range(1, 1001), util_pl1_cfr, label="CFR")
+    plt.plot(range(1, 1001), util_pl1_cfrplus, label="CFR+")
+    plt.plot(range(1, 1001), util_pl1_dcfr, label="DCFR")
+    plt.plot(range(1, 1001), util_pl1_pcfr1, label="PCFR 1")
+    plt.plot(range(1, 1001), util_pl1_pcfr2, label="PCFR 2")
+    plt.xlabel('T')
+    plt.ylabel('EV')
+    plt.title(f'Plot of utilities as a function of T')
+    plt.legend(loc="best")
+    plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Problem 3 (CFR)')
     parser.add_argument("--game", help="Path to game file")
-    parser.add_argument("--problem", choices=["3.1", "3.2", "3.3"])
+    parser.add_argument("--problem", choices=["3.1", "3.2", "3.3", "3.4"])
 
     args = parser.parse_args()
     print("Reading game path %s..." % args.game)
@@ -1169,6 +1783,8 @@ if __name__ == "__main__":
         solve_problem_3_1(game)
     elif args.problem == "3.2":
         solve_problem_3_2(game)
-    else:
-        assert args.problem == "3.3"
+    elif args.problem == "3.3":
         solve_problem_3_3(game)
+    else:
+        assert args.problem == "3.4"
+        solve_problem_3_4(game)
